@@ -2,6 +2,7 @@ package com.jos.myapplication.screens.auth
 
 import android.widget.Toast
 
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,7 +48,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -64,6 +64,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FirebaseFirestore
 
 import com.jos.myapplication.components.AuthLogo
+import com.jos.myapplication.database.DatabaseHelper
 import com.jos.myapplication.ui.theme.BackgroundLight
 import com.jos.myapplication.ui.theme.BorderGray
 import com.jos.myapplication.ui.theme.ChatSphereTheme
@@ -508,9 +509,7 @@ fun CreateAccountScreen(
                             }
 
                             // ---------------------------------
-                            // Firebase is created ONLY after
-                            // the user presses the button.
-                            // This keeps Compose Preview working.
+                            // Firebase
                             // ---------------------------------
 
                             val auth = FirebaseAuth.getInstance()
@@ -549,6 +548,20 @@ fun CreateAccountScreen(
 
                                                 .addOnSuccessListener {
 
+                                                    // -----------------------------
+                                                    // Save user to local SQLite
+                                                    // -----------------------------
+
+                                                    val databaseHelper =
+                                                        DatabaseHelper(context)
+
+                                                    databaseHelper.addUser(
+                                                        name = fullName.trim(),
+                                                        email = email.trim()
+                                                    )
+
+
+
                                                     Toast.makeText(
                                                         context,
                                                         "Account created successfully",
@@ -560,6 +573,20 @@ fun CreateAccountScreen(
                                                 }
 
                                                 .addOnFailureListener {
+
+                                                    // Firebase Authentication succeeded,
+                                                    // but Firestore failed.
+                                                    // We still save the user locally.
+
+                                                    val databaseHelper =
+                                                        DatabaseHelper(context)
+
+                                                    databaseHelper.addUser(
+                                                        name = fullName.trim(),
+                                                        email = email.trim()
+                                                    )
+
+
 
                                                     Toast.makeText(
                                                         context,
