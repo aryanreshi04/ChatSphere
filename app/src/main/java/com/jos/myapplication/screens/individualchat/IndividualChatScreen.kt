@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -44,6 +45,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -58,13 +60,11 @@ import androidx.compose.ui.unit.sp
 import com.jos.myapplication.components.ChatMessage
 import com.jos.myapplication.components.InitialsAvatar
 import com.jos.myapplication.components.MessageType
-import com.jos.myapplication.components.sampleMessages
 import com.jos.myapplication.ui.theme.BackgroundLight
 import com.jos.myapplication.ui.theme.BorderGray
 import com.jos.myapplication.ui.theme.BubbleReceived
 import com.jos.myapplication.ui.theme.BubbleSent
 import com.jos.myapplication.ui.theme.DividerChipGray
-import com.jos.myapplication.ui.theme.OnlineGreen
 import com.jos.myapplication.ui.theme.PurpleLight
 import com.jos.myapplication.ui.theme.PurplePrimary
 import com.jos.myapplication.ui.theme.SurfaceWhite
@@ -74,12 +74,25 @@ import com.jos.myapplication.ui.theme.TextSecondary
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun IndividualChatScreen(
+    conversationId: String,
+    currentUserUid: String,
     contactName: String,
     contactInitials: String,
+    messages: List<ChatMessage>,
+    messagesLoading: Boolean,
+    loadErrorMessage: String?,
+    onSendMessage: (String, (Exception?) -> Unit) -> Unit,
     onBackClick: () -> Unit
 ) {
     var messageText by remember {
         mutableStateOf("")
+    }
+    var sending by remember { mutableStateOf(false) }
+    var sendError by remember { mutableStateOf<String?>(null) }
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(messages.lastIndex)
     }
 
     Scaffold(
@@ -109,26 +122,11 @@ fun IndividualChatScreen(
                                 color = TextPrimary
                             )
 
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(7.dp)
-                                        .clip(CircleShape)
-                                        .background(OnlineGreen)
-                                )
-
-                                Spacer(
-                                    modifier = Modifier.width(4.dp)
-                                )
-
-                                Text(
-                                    text = "Online",
-                                    fontSize = 12.sp,
-                                    color = TextSecondary
-                                )
-                            }
+                            Text(
+                                text = "Direct message",
+                                fontSize = 12.sp,
+                                color = TextSecondary
+                            )
                         }
                     }
                 },
@@ -168,6 +166,20 @@ fun IndividualChatScreen(
                 messageText = messageText,
                 onMessageChange = {
                     messageText = it
+                    sendError = null
+                },
+                sending = sending,
+                onSend = {
+                    val content = messageText.trim()
+                    if (content.isNotEmpty() && !sending) {
+                        sending = true
+                        sendError = null
+                        onSendMessage(content) { failure ->
+                            sending = false
+                            if (failure == null) messageText = ""
+                            else sendError = failure.localizedMessage ?: "Message could not be sent. Check your connection and try again."
+                        }
+                    }
                 }
             )
         }
@@ -178,21 +190,28 @@ fun IndividualChatScreen(
                 .padding(innerPadding)
                 .fillMaxSize(),
 
+            state = listState,
+
             contentPadding = PaddingValues(
                 vertical = 12.dp
             )
         ) {
 
-            item {
-                DateDivider(
-                    text = "Today, 10:42 AM"
-                )
-            }
-
-            items(sampleMessages) { message ->
-                MessageBubble(
-                    message = message
-                )
+            if (messagesLoading) {
+                item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { androidx.compose.material3.CircularProgressIndicator(color = PurplePrimary) } }
+            } else {
+                if (loadErrorMessage != null) {
+                    item { Text(loadErrorMessage, color = androidx.compose.material3.MaterialTheme.colorScheme.error, modifier = Modifier.padding(16.dp)) }
+                }
+                if (sendError != null) {
+                    item { Text(sendError.orEmpty(), color = androidx.compose.material3.MaterialTheme.colorScheme.error, modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) }
+                }
+                if (messages.isEmpty() && loadErrorMessage == null) {
+                    item { Box(Modifier.fillMaxWidth().padding(24.dp), contentAlignment = Alignment.Center) { Text("No messages yet. Say hello!", color = TextSecondary) } }
+                }
+                items(messages, key = { it.id }) { message ->
+                    MessageBubble(message = message)
+                }
             }
         }
     }
@@ -425,7 +444,9 @@ private fun WaveformBars() {
 @Composable
 private fun ChatInputBar(
     messageText: String,
-    onMessageChange: (String) -> Unit
+    onMessageChange: (String) -> Unit,
+    sending: Boolean,
+    onSend: () -> Unit
 ) {
     Surface(
         color = BackgroundLight
@@ -506,16 +527,24 @@ private fun ChatInputBar(
                     .size(46.dp)
                     .clip(CircleShape)
                     .background(PurplePrimary)
-                    .clickable { },
+                    .clickable(enabled = messageText.isNotBlank() && !sending, onClick = onSend),
 
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = Icons.Default.Send,
-                    contentDescription = "Send",
-                    tint = Color.White,
-                    modifier = Modifier.size(20.dp)
-                )
+                if (sending) {
+                    androidx.compose.material3.CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        imageVector = Icons.Default.Send,
+                        contentDescription = "Send",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
             }
         }
     }
@@ -525,8 +554,14 @@ private fun ChatInputBar(
 fun IndividualChatScreenPreview() {
     ChatSphereTheme {
         IndividualChatScreen(
+            conversationId = "preview",
+            currentUserUid = "preview",
             contactName = "Alice Freeman",
             contactInitials = "AF",
+            messages = emptyList(),
+            messagesLoading = false,
+            loadErrorMessage = null,
+            onSendMessage = { _, callback -> callback(null) },
             onBackClick = {}
         )
     }

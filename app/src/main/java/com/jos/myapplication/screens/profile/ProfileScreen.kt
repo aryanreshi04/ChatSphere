@@ -62,7 +62,10 @@ import com.jos.myapplication.ui.theme.TextTertiary
 @Composable
 fun ProfileScreen(
     onBackClick: () -> Unit,
-    onChatsClick: () -> Unit
+    onChatsClick: () -> Unit,
+    name: String = "",
+    email: String = "",
+    onLogoutClick: () -> Unit = {}
 ) {
     Scaffold(
         containerColor = BackgroundLight,
@@ -128,7 +131,7 @@ fun ProfileScreen(
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = "AK",
+                    text = initialsFor(name.ifBlank { email }),
                     color = Color.White,
                     fontSize = 40.sp,
                     fontWeight = FontWeight.Bold
@@ -140,7 +143,7 @@ fun ProfileScreen(
             )
 
             Text(
-                text = "Amit Kumar",
+                text = name.ifBlank { "Your profile" },
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
@@ -151,7 +154,7 @@ fun ProfileScreen(
             )
 
             Text(
-                text = "amit.kumar@example.com",
+                text = email,
                 fontSize = 14.sp,
                 color = TextSecondary
             )
@@ -274,7 +277,7 @@ fun ProfileScreen(
                         label = "Logout",
                         tint = LogoutRed,
                         showChevron = false
-                    ) { }
+                    ) { onLogoutClick() }
                 }
             }
 
@@ -339,7 +342,15 @@ fun ProfileScreenPreview() {
     ChatSphereTheme {
         ProfileScreen(
             onBackClick = {},
-            onChatsClick = {}
+            onChatsClick = {},
+            name = "Amit Kumar",
+            email = "amit.kumar@example.com"
         )
     }
 }
+
+private fun initialsFor(value: String): String = value.split("@", " ")
+    .filter(String::isNotBlank)
+    .take(2)
+    .joinToString("") { it.take(1).uppercase() }
+    .ifBlank { "?" }
