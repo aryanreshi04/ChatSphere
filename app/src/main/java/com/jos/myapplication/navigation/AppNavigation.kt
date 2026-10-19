@@ -18,6 +18,8 @@ import com.jos.myapplication.screens.auth.LoginScreen
 import com.jos.myapplication.screens.chats.ChatsScreen
 import com.jos.myapplication.screens.individualchat.IndividualChatScreen
 import com.jos.myapplication.screens.profile.ProfileScreen
+import com.jos.myapplication.screens.notifications.NotificationsScreen
+import com.jos.myapplication.screens.settings.SettingsScreen
 
 object Routes {
     const val CREATE_ACCOUNT = "create_account"
@@ -25,6 +27,8 @@ object Routes {
     const val CHATS = "chats"
     const val INDIVIDUAL_CHAT = "individual_chat/{userId}"
     const val PROFILE = "profile"
+    const val NOTIFICATIONS = "notifications"
+    const val SETTINGS = "settings"
 
     fun chatForUser(userId: String): String = "individual_chat/${Uri.encode(userId)}"
 }
@@ -110,12 +114,30 @@ fun AppNavigation() {
             ProfileScreen(
                 onBackClick = { navController.popBackStack() },
                 onChatsClick = { navController.popBackStack() },
+                onNotificationsClick = {
+                    navController.navigate(Routes.NOTIFICATIONS) { launchSingleTop = true }
+                },
+                onSettingsClick = {
+                    navController.navigate(Routes.SETTINGS) { launchSingleTop = true }
+                },
                 onLogoutClick = {
                     navController.navigate(Routes.LOGIN) {
                         popUpTo(Routes.CHATS) { inclusive = true }
                         launchSingleTop = true
                     }
                 }
+            )
+        }
+
+        composable(Routes.NOTIFICATIONS) {
+            NotificationsScreen(
+                onBackClick = { navController.popBackStack() }
+            )
+        }
+
+        composable(Routes.SETTINGS) {
+            SettingsScreen(
+                onBackClick = { navController.popBackStack() }
             )
         }
     }

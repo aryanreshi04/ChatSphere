@@ -1,6 +1,7 @@
 package com.jos.myapplication.screens.profile
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -91,7 +92,9 @@ import kotlinx.coroutines.withContext
 fun ProfileScreen(
     onBackClick: () -> Unit,
     onChatsClick: () -> Unit,
-    onLogoutClick: () -> Unit = {}
+    onLogoutClick: () -> Unit = {},
+    onNotificationsClick: () -> Unit = {},
+    onSettingsClick: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val isPreview = LocalInspectionMode.current
@@ -101,6 +104,37 @@ fun ProfileScreen(
     val userId = authUser?.uid
     val preferences = remember(context) {
         context.getSharedPreferences("chatsphere_profile_photos", Context.MODE_PRIVATE)
+    }
+
+    // Settings are stored per account, not shared between users on the phone.
+    val settingsPreferences = remember(context) {
+        context.getSharedPreferences("chatsphere_settings", Context.MODE_PRIVATE)
+    }
+    var showEmailOnProfile by remember(userId) {
+        mutableStateOf(settingsPreferences.getBoolean("show_email_$userId", true))
+    }
+    var confirmBeforeLogout by remember(userId) {
+        mutableStateOf(settingsPreferences.getBoolean("confirm_logout_$userId", true))
+    }
+
+    // Keep the Profile page current when returning from Settings.
+    DisposableEffect(userId, settingsPreferences, isPreview) {
+        if (isPreview || userId == null) {
+            onDispose { }
+        } else {
+            val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
+                when (key) {
+                    "show_email_$userId" -> {
+                        showEmailOnProfile = changed.getBoolean(key, true)
+                    }
+                    "confirm_logout_$userId" -> {
+                        confirmBeforeLogout = changed.getBoolean(key, true)
+                    }
+                }
+            }
+            settingsPreferences.registerOnSharedPreferenceChangeListener(listener)
+            onDispose { settingsPreferences.unregisterOnSharedPreferenceChangeListener(listener) }
+        }
     }
 
     var userName by remember(userId) {
@@ -260,7 +294,9 @@ fun ProfileScreen(
                 color = TextPrimary
             )
             Spacer(modifier = Modifier.height(4.dp))
-            Text(text = userEmail, fontSize = 14.sp, color = TextSecondary)
+            if (showEmailOnProfile) {
+                Text(text = userEmail, fontSize = 14.sp, color = TextSecondary)
+            }
             Spacer(modifier = Modifier.height(24.dp))
 
             OutlinedButton(
@@ -308,16 +344,27 @@ fun ProfileScreen(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Column {
-                    ProfileMenuRow(Icons.Default.Notifications, "Notifications", TextPrimary) { }
+                    ProfileMenuRow(Icons.Default.Notifications, "Notifications", TextPrimary) {
+                        onNotificationsClick()
+                    }
                     HorizontalDivider(color = DividerGray)
-                    ProfileMenuRow(Icons.Default.Settings, "Settings", TextPrimary) { }
+                    ProfileMenuRow(Icons.Default.Settings, "Settings", TextPrimary) {
+                        onSettingsClick()
+                    }
                     HorizontalDivider(color = DividerGray)
                     ProfileMenuRow(
                         icon = Icons.Default.Logout,
                         label = "Logout",
                         tint = LogoutRed,
                         showChevron = false
-                    ) { showLogoutDialog = true }
+                    ) {
+                        if (confirmBeforeLogout) {
+                            showLogoutDialog = true
+                        } else {
+                            if (!isPreview) FirebaseAuth.getInstance().signOut()
+                            onLogoutClick()
+                        }
+                    }
                 }
             }
             Spacer(modifier = Modifier.height(24.dp))
