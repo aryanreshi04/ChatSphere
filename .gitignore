@@ -1,5 +1,6 @@
 *.iml
 .gradle
+.kotlin/
 /local.properties
 /.idea/caches
 /.idea/libraries
@@ -13,3 +14,19 @@
 .externalNativeBuild
 .cxx
 local.properties
+**/node_modules/
+**/.venv/
+**/__pycache__/
+**/.env
+**/.env.*
+!**/.env.example
+**/service-account*.json
+**/*adminsdk*.json
+**/*.sqlite3
+**/*.sqlite3-*
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+/app/google-services.json
+
+/maps.properties

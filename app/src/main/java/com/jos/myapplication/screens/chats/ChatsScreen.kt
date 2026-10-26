@@ -28,6 +28,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Map
+import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -42,6 +44,9 @@ import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -70,6 +75,11 @@ import com.jos.myapplication.components.BottomNavTab
 import com.jos.myapplication.components.Conversation
 import com.jos.myapplication.components.InitialsAvatar
 import com.jos.myapplication.firebase.ChatRepository
+import com.jos.myapplication.ChatSphereApp
+import com.google.firebase.firestore.MetadataChanges
+import org.json.JSONArray
+import org.json.JSONObject
+import kotlinx.coroutines.launch
 import com.jos.myapplication.ui.theme.BackgroundLight
 import com.jos.myapplication.ui.theme.ChatSphereTheme
 import com.jos.myapplication.ui.theme.DividerGray
@@ -95,13 +105,19 @@ private data class ChatThread(
 @Composable
 fun ChatsScreen(
     onConversationClick: (Conversation) -> Unit,
-    onProfileClick: () -> Unit
+    onProfileClick: () -> Unit,
+    onMapClick: () -> Unit = {},
+    onAssistantClick: () -> Unit = {}
 ) {
     val isPreview = LocalInspectionMode.current
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val signedInUser = if (isPreview) null else FirebaseAuth.getInstance().currentUser
     val currentUserId = if (isPreview) "preview-self-id" else signedInUser?.uid
+    val app = if (isPreview) null else ChatSphereApp.instance
+    val online by app?.connectivity?.online?.collectAsState() ?: remember { mutableStateOf(false) }
+    var refresh by remember { mutableIntStateOf(0) }
+    var cachedChats by remember { mutableStateOf(true) }
 
     // Display the signed-in user's own profile, not the sample "AK" avatar.
     // Firestore supplies their latest name; Authentication provides a fallback.
@@ -168,6 +184,7 @@ fun ChatsScreen(
         )
     }
     var hiddenChats by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var hiddenServerLoaded by remember { mutableStateOf(false) }
     var loadedChats by remember(isPreview) { mutableStateOf(isPreview) }
     var loadedUsers by remember(isPreview) { mutableStateOf(isPreview) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -178,18 +195,54 @@ fun ChatsScreen(
     var selectedToDelete by remember { mutableStateOf<ChatThread?>(null) }
     var deleting by remember { mutableStateOf(false) }
 
+    fun saveCache(key: String, json: String) {
+        if (app != null && currentUserId != null) app.scope.launch(Dispatchers.IO) {
+            runCatching { app.database.putRecord(currentUserId, "home", key, json) }
+        }
+    }
+    LaunchedEffect(currentUserId) {
+        if (app != null && currentUserId != null) {
+            val saved = withContext(Dispatchers.IO) {
+                listOf("users", "threads", "hidden").associateWith { app.database.record(currentUserId, "home", it) }
+            }
+            saved["users"]?.let { json -> if (!loadedUsers) {
+                val array = JSONArray(json)
+                registeredUsers = (0 until array.length()).map { array.getJSONObject(it) }.map {
+                    makeContact(it.getString("id"), it.getString("name"), it.optString("email"))
+                }
+                loadedUsers = true
+            } }
+            saved["threads"]?.let { json -> if (!loadedChats) {
+                val array = JSONArray(json)
+                threads = (0 until array.length()).map { array.getJSONObject(it) }.map {
+                    val members = it.getJSONArray("participants")
+                    ChatThread(it.getString("id"), (0 until members.length()).map { index -> members.getString(index) },
+                        it.optString("lastMessage"), it.optLong("lastMessageTime"), it.optString("lastMessageId"))
+                }
+                loadedChats = true
+            } }
+            saved["hidden"]?.let { json ->
+                if (!hiddenServerLoaded) {
+                    val obj = JSONObject(json)
+                    hiddenChats = obj.keys().asSequence().associateWith { obj.getString(it) }
+                }
+            }
+        }
+    }
+
     // The contact picker uses registered users, but the home list uses only
     // conversations involving the signed-in user (not every registered user).
-    DisposableEffect(isPreview, currentUserId) {
+    DisposableEffect(isPreview, currentUserId, online, refresh) {
         if (isPreview || currentUserId == null) {
             onDispose { }
         } else {
             val db = FirebaseFirestore.getInstance()
             val usersListener = db.collection("users")
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         errorMessage = "Could not load users: ${error.localizedMessage}"
                     } else if (snapshot != null) {
+                        if (snapshot.metadata.isFromCache && snapshot.isEmpty && loadedUsers) return@addSnapshotListener
                         snapshot.documents.firstOrNull { it.id == currentUserId }
                             ?.getString("name")
                             ?.takeIf { it.isNotBlank() }
@@ -200,15 +253,19 @@ fun ChatsScreen(
                             else makeContact(doc.id, name, doc.getString("email").orEmpty())
                         }
                         loadedUsers = true
+                        saveCache("users", JSONArray().apply {
+                            registeredUsers.forEach { put(JSONObject().put("id", it.id).put("name", it.name).put("email", it.lastMessage)) }
+                        }.toString())
                     }
                 }
 
             val threadsListener = db.collection("conversations")
                 .whereArrayContains("participants", currentUserId)
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         errorMessage = "Could not load chats: ${error.localizedMessage}"
                     } else if (snapshot != null) {
+                        if (snapshot.metadata.isFromCache && snapshot.isEmpty && loadedChats) return@addSnapshotListener
                         threads = snapshot.documents.mapNotNull { doc ->
                             val participants = (doc.get("participants") as? List<*>)
                                 ?.filterIsInstance<String>().orEmpty()
@@ -222,6 +279,11 @@ fun ChatsScreen(
                             )
                         }
                         loadedChats = true
+                        cachedChats = snapshot.metadata.isFromCache
+                        saveCache("threads", JSONArray().apply {
+                            threads.forEach { put(JSONObject().put("id", it.id).put("participants", JSONArray(it.participants))
+                                .put("lastMessage", it.lastMessage).put("lastMessageTime", it.lastMessageTime).put("lastMessageId", it.lastMessageId)) }
+                        }.toString())
                     }
                 }
 
@@ -229,13 +291,16 @@ fun ChatsScreen(
             val hiddenListener = db.collection("users")
                 .document(currentUserId)
                 .collection("hiddenChats")
-                .addSnapshotListener { snapshot, error ->
+                .addSnapshotListener(MetadataChanges.INCLUDE) { snapshot, error ->
                     if (error != null) {
                         errorMessage = "Could not load hidden chats: ${error.localizedMessage}"
                     } else if (snapshot != null) {
+                        if (snapshot.metadata.isFromCache && snapshot.isEmpty) return@addSnapshotListener
+                        if (!snapshot.metadata.isFromCache) hiddenServerLoaded = true
                         hiddenChats = snapshot.documents.associate { doc ->
                             doc.id to doc.getString("hiddenMessageId").orEmpty()
                         }
+                        saveCache("hidden", JSONObject(hiddenChats).toString())
                     }
                 }
 
@@ -294,6 +359,8 @@ fun ChatsScreen(
                     }
                 },
                 actions = {
+                    IconButton(onClick = onMapClick) { Icon(Icons.Default.Map, contentDescription = "Live map", tint = TextPrimary) }
+                    IconButton(onClick = onAssistantClick) { Icon(Icons.Default.SmartToy, contentDescription = "AI assistant", tint = TextPrimary) }
                     IconButton(onClick = { showAddDialog = true }) {
                         Icon(Icons.Default.Search, contentDescription = "Find people",
                             tint = TextPrimary)
@@ -330,6 +397,9 @@ fun ChatsScreen(
                 onQueryChange = { searchQuery = it },
                 placeholder = "Search chats"
             )
+            if (!online || cachedChats) Text(
+                if (!online) "Offline · showing cached chats" else "Cached chats · synchronizing…",
+                modifier = Modifier.padding(horizontal = 16.dp), color = TextSecondary, fontSize = 12.sp)
 
             if (errorMessage != null) {
                 Text(
@@ -338,6 +408,7 @@ fun ChatsScreen(
                     fontSize = 12.sp,
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
                 )
+                TextButton(onClick = { errorMessage = null; refresh++ }) { Text("Retry refresh") }
             }
 
             if (chatsWithContacts.isEmpty()) {

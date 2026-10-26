@@ -20,6 +20,14 @@ import com.jos.myapplication.screens.individualchat.IndividualChatScreen
 import com.jos.myapplication.screens.profile.ProfileScreen
 import com.jos.myapplication.screens.notifications.NotificationsScreen
 import com.jos.myapplication.screens.settings.SettingsScreen
+import com.jos.myapplication.screens.maps.MapScreen
+import com.google.firebase.auth.FirebaseAuth
+import androidx.compose.runtime.LaunchedEffect
+import com.jos.myapplication.notifications.NotificationTarget
+import com.jos.myapplication.notifications.ChatNotifications
+import androidx.compose.ui.platform.LocalContext
+import android.widget.Toast
+import com.jos.myapplication.screens.assistant.AssistantScreen
 
 object Routes {
     const val CREATE_ACCOUNT = "create_account"
@@ -29,17 +37,53 @@ object Routes {
     const val PROFILE = "profile"
     const val NOTIFICATIONS = "notifications"
     const val SETTINGS = "settings"
+    const val MAP = "map"
+    const val ASSISTANT = "assistant"
 
     fun chatForUser(userId: String): String = "individual_chat/${Uri.encode(userId)}"
 }
 
 @Composable
-fun AppNavigation() {
+fun AppNavigation(pendingNotification: NotificationTarget? = null, onNotificationHandled: () -> Unit = {}) {
     val navController = rememberNavController()
+    val initialRoute = remember { if (FirebaseAuth.getInstance().currentUser != null) Routes.CHATS else Routes.CREATE_ACCOUNT }
+    var signedInUid by remember { mutableStateOf(FirebaseAuth.getInstance().currentUser?.uid) }
+    val context = LocalContext.current
+    var previousUid by remember { mutableStateOf(signedInUid) }
+    DisposableEffect(Unit) {
+        val auth = FirebaseAuth.getInstance()
+        val listener = FirebaseAuth.AuthStateListener { signedInUid = it.currentUser?.uid }
+        auth.addAuthStateListener(listener)
+        onDispose { auth.removeAuthStateListener(listener) }
+    }
+    LaunchedEffect(signedInUid) {
+        if (previousUid != null && signedInUid != previousUid) {
+            navController.navigate(if (signedInUid == null) Routes.LOGIN else Routes.CHATS) {
+                popUpTo(navController.graph.id) { inclusive = true }
+                launchSingleTop = true
+            }
+        }
+        previousUid = signedInUid
+    }
+    LaunchedEffect(pendingNotification, signedInUid) {
+        val target = pendingNotification ?: return@LaunchedEffect
+        if (signedInUid == null) return@LaunchedEffect
+        try {
+            if(target.kind=="test"){
+                if(ChatNotifications.validTest(target))navController.navigate(Routes.NOTIFICATIONS){launchSingleTop=true}
+                else Toast.makeText(context,"This test notification is no longer available",Toast.LENGTH_SHORT).show()
+                return@LaunchedEffect
+            }
+            val sender = ChatNotifications.validatedSender(target)
+            if (sender != null) navController.navigate(Routes.chatForUser(sender)) { launchSingleTop = true }
+            else Toast.makeText(context, "This notification is unavailable for the signed-in account", Toast.LENGTH_LONG).show()
+        } catch (_: Exception) { Toast.makeText(context, "Could not open notification. Check connection and open the chat from Chats.", Toast.LENGTH_LONG).show() }
+        finally { onNotificationHandled() }
+    }
 
     NavHost(
         navController = navController,
-        startDestination = Routes.CREATE_ACCOUNT
+        startDestination = initialRoute
     ) {
         composable(Routes.CREATE_ACCOUNT) {
             CreateAccountScreen(
@@ -64,9 +108,11 @@ fun AppNavigation() {
         composable(Routes.CHATS) {
             ChatsScreen(
                 onConversationClick = { contact ->
-                    navController.navigate(Routes.chatForUser(contact.id))
+                    navController.navigate(Routes.chatForUser(contact.id)) { launchSingleTop = true }
                 },
-                onProfileClick = { navController.navigate(Routes.PROFILE) }
+                onProfileClick = { navController.navigate(Routes.PROFILE) },
+                onMapClick = { navController.navigate(Routes.MAP) { launchSingleTop = true } },
+                onAssistantClick = { navController.navigate(Routes.ASSISTANT) { launchSingleTop = true } }
             )
         }
 
@@ -140,5 +186,7 @@ fun AppNavigation() {
                 onBackClick = { navController.popBackStack() }
             )
         }
+        composable(Routes.MAP) { MapScreen { navController.popBackStack() } }
+        composable(Routes.ASSISTANT) { AssistantScreen { navController.popBackStack() } }
     }
 }

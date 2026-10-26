@@ -84,6 +84,7 @@ import com.jos.myapplication.ui.theme.SurfaceWhite
 import com.jos.myapplication.ui.theme.TextPrimary
 import com.jos.myapplication.ui.theme.TextSecondary
 import com.jos.myapplication.ui.theme.TextTertiary
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -157,6 +158,12 @@ fun ProfileScreen(
     var showEditDialog by remember { mutableStateOf(false) }
     var editedName by remember { mutableStateOf("") }
     var savingName by remember { mutableStateOf(false) }
+    val logoutScope=androidx.compose.runtime.rememberCoroutineScope()
+    var loggingOut by remember{mutableStateOf(false)}
+    fun logout(){if(loggingOut)return;loggingOut=true;logoutScope.launch{
+        try{if(!isPreview)com.jos.myapplication.notifications.ChatNotifications.signOut(context)}
+        finally{loggingOut=false;onLogoutClick()}
+    }}
     var showLogoutDialog by remember { mutableStateOf(false) }
 
     // Observe the logged-in user's Firestore profile so changes appear immediately.
@@ -361,8 +368,7 @@ fun ProfileScreen(
                         if (confirmBeforeLogout) {
                             showLogoutDialog = true
                         } else {
-                            if (!isPreview) FirebaseAuth.getInstance().signOut()
-                            onLogoutClick()
+                            logout()
                         }
                     }
                 }
@@ -426,8 +432,7 @@ fun ProfileScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showLogoutDialog = false
-                    if (!isPreview) FirebaseAuth.getInstance().signOut()
-                    onLogoutClick()
+                    logout()
                 }) { Text("Logout", color = LogoutRed) }
             },
             dismissButton = {

@@ -1,6 +1,15 @@
 package com.jos.myapplication.screens.notifications
 
 import android.content.Context
+import android.Manifest
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.Button
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import com.jos.myapplication.notifications.ChatNotifications
+import kotlinx.coroutines.launch
 import android.content.Intent
 import android.provider.Settings
 import android.widget.Toast
@@ -68,6 +77,21 @@ fun NotificationsScreen(onBackClick: () -> Unit) {
     val prefs = remember(context) {
         context.getSharedPreferences("chatsphere_settings", Context.MODE_PRIVATE)
     }
+    val scope = rememberCoroutineScope()
+    var testBusy by remember{mutableStateOf(false)}
+    var testStatus by remember{mutableStateOf<String?>(null)}
+    var testRequest by remember(userId){mutableStateOf<String?>(null)}
+    var studyEnabled by remember(userId){mutableStateOf(prefs.getBoolean("ai_study_alerts_$userId",false))}
+    var deviceReady by remember { mutableStateOf(false) }
+    var permissionStatus by remember { mutableStateOf<String?>(null) }
+    var categories by remember(userId) { mutableStateOf(prefs.getBoolean("ml_categories_$userId", false)) }
+    val permission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { allowed ->
+        permissionStatus = if (allowed) "Notification permission granted" else "Permission denied. You can enable notifications in Android settings below."
+        if (allowed) scope.launch { deviceReady = runCatching { ChatNotifications.registerDevice() }.isSuccess }
+    }
+    LaunchedEffect(userId) {
+        if (!isPreview && userId.isNotBlank()) deviceReady = runCatching { ChatNotifications.registerDevice() }.isSuccess
+    }
 
     var messageAlerts by remember(userId) {
         mutableStateOf(prefs.getBoolean("message_alerts_$userId", true))
@@ -104,6 +128,11 @@ fun NotificationsScreen(onBackClick: () -> Unit) {
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Text("Message preferences", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Button(onClick = {
+                if (Build.VERSION.SDK_INT >= 33) permission.launch(Manifest.permission.POST_NOTIFICATIONS)
+                else permissionStatus = "Use Android notification settings below to allow alerts."
+            }) { Text("Allow notifications") }
+            permissionStatus?.let { Text(it, fontSize = 12.sp, color = TextSecondary) }
 
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -148,7 +177,26 @@ fun NotificationsScreen(onBackClick: () -> Unit) {
                 }
             }
 
+            NotificationSwitchRow(Icons.Default.Notifications,"AI study alerts",
+                "Opt-in local ML classifies incoming text and highlights Study messages. Experimental; no deadline extraction or urgency prediction. At most one study alert every 30 seconds.",
+                studyEnabled,onCheckedChange={studyEnabled=it;prefs.edit().putBoolean("ai_study_alerts_$userId",it).apply()})
+            Button(enabled=!testBusy&&userId.isNotBlank(),onClick={
+                testBusy=true
+                scope.launch{try{
+                    ChatNotifications.registerDevice()
+                    val id=testRequest?:java.util.UUID.randomUUID().toString().also{testRequest=it}
+                    val result=com.jos.myapplication.network.BackendConnection.json(context,"/v1/push/test",org.json.JSONObject().put("requestId",id))
+                    testStatus=if(result.optInt("accepted")>0)"Test accepted by FCM. Check this device's notification tray; acceptance alone does not prove delivery."else"Test processed. Check the tray and Android permission/channel settings."
+                    testRequest=null
+                }catch(e:kotlinx.coroutines.CancellationException){throw e}
+                catch(e:Exception){testStatus=e.message?.take(300)?:"Could not send test. Check the backend and Firebase configuration."}
+                finally{testBusy=false}}
+            }){Text(if(testBusy)"Sending test…"else"Send test push to my devices")}
+            testStatus?.let{Text(it,fontSize=12.sp,color=TextSecondary)}
             Text("Device permissions", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            NotificationSwitchRow(Icons.Default.Notifications, "Experimental ML categories",
+                "On-device Study / Meetup / Conversation labels; no urgency prediction. Small synthetic training set, no accuracy claims.",
+                categories, onCheckedChange = { categories = it; prefs.edit().putBoolean("ml_categories_$userId", it).apply() })
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
@@ -182,7 +230,7 @@ fun NotificationsScreen(onBackClick: () -> Unit) {
             }
 
             Text(
-                "These preferences are saved on this device. Background push notifications are not active yet; Firebase Cloud Messaging must be added before these options control real message alerts.",
+                "Foreground alerts work while ChatSphere is open outside the active conversation. Device registration: ${if (deviceReady) "saved" else "unavailable; check connection and Firestore rules"}. Closed-app push additionally needs a trusted sender running on a computer or server. Delivery has not been verified on this device. Android channel settings can override sound and vibration preferences.",
                 fontSize = 13.sp,
                 color = TextSecondary
             )

@@ -27,6 +27,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 
+import androidx.compose.runtime.rememberCoroutineScope
+import com.jos.myapplication.ChatSphereApp
+import com.jos.myapplication.network.awaitResult
+import kotlinx.coroutines.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +69,9 @@ fun LoginScreen(
     // -----------------------------
     // Form fields
     // -----------------------------
+
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
 
     var email by remember {
         mutableStateOf("")
@@ -249,6 +256,7 @@ fun LoginScreen(
                     // -----------------------------
 
                     Button(
+                        enabled = !submitting,
 
                         onClick = {
 
@@ -272,36 +280,27 @@ fun LoginScreen(
                             // when the button is clicked
                             // -----------------------------
 
-                            val auth = FirebaseAuth.getInstance()
-
-                            auth.signInWithEmailAndPassword(
-                                email.trim(),
-                                password
-                            )
-
-                                .addOnCompleteListener { task ->
-
-                                    if (task.isSuccessful) {
-
-                                        Toast.makeText(
-                                            context,
-                                            "Login successful",
-                                            Toast.LENGTH_SHORT
-                                        ).show()
-
-                                        // Go to Chats
-                                        onLoginClick()
-
-                                    } else {
-
-                                        Toast.makeText(
-                                            context,
-                                            task.exception?.message
-                                                ?: "Login failed",
-                                            Toast.LENGTH_LONG
-                                        ).show()
+                            if (submitting) return@Button
+                            submitting = true
+                            scope.launch {
+                                try {
+                                    val auth = FirebaseAuth.getInstance()
+                                    withTimeout(25_000) { auth.signInWithEmailAndPassword(email.trim(), password).awaitResult() }
+                                    val user = auth.currentUser ?: error("Sign in failed")
+                                    // Repair a missing profile from an interrupted registration without overwriting an existing name.
+                                    runCatching {
+                                        withTimeout(15_000) {
+                                            val ref = com.google.firebase.firestore.FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                                            val profile = ref.get().awaitResult()
+                                            if (!profile.exists()) ref.set(mapOf("name" to (user.displayName?.takeIf { it.isNotBlank() } ?: user.email.orEmpty().substringBefore('@')).take(80), "email" to user.email.orEmpty())).awaitResult()
+                                        }
                                     }
-                                }
+                                    onLoginClick()
+                                } catch (e: Exception) {
+                                    if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                                    Toast.makeText(context, "Could not sign in. Check connection, email and password, then retry.", Toast.LENGTH_LONG).show()
+                                } finally { submitting = false }
+                            }
                         },
 
                         modifier = Modifier

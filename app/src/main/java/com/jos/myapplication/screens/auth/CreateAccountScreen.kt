@@ -39,6 +39,10 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 
+import androidx.compose.runtime.rememberCoroutineScope
+import com.jos.myapplication.ChatSphereApp
+import com.jos.myapplication.network.awaitResult
+import kotlinx.coroutines.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -83,6 +87,9 @@ fun CreateAccountScreen(
     // -----------------------------
     // Form fields
     // -----------------------------
+
+    val scope = rememberCoroutineScope()
+    var submitting by remember { mutableStateOf(false) }
 
     var fullName by remember {
         mutableStateOf("")
@@ -464,6 +471,7 @@ fun CreateAccountScreen(
                     // -----------------------------
 
                     Button(
+                        enabled = !submitting,
 
                         onClick = {
 
@@ -512,103 +520,32 @@ fun CreateAccountScreen(
                             // Firebase
                             // ---------------------------------
 
-                            val auth = FirebaseAuth.getInstance()
-                            val db = FirebaseFirestore.getInstance()
-
-                            // ---------------------------------
-                            // Create Firebase account
-                            // ---------------------------------
-
-                            auth.createUserWithEmailAndPassword(
-                                email.trim(),
-                                password
-                            )
-
-                                .addOnCompleteListener { task ->
-
-                                    if (task.isSuccessful) {
-
-                                        val user = auth.currentUser
-
-                                        if (user != null) {
-
-                                            // -----------------------------
-                                            // Save user information
-                                            // -----------------------------
-
-                                            val userData =
-                                                hashMapOf(
-                                                    "name" to fullName.trim(),
-                                                    "email" to email.trim()
-                                                )
-
-                                            db.collection("users")
-                                                .document(user.uid)
-                                                .set(userData)
-
-                                                .addOnSuccessListener {
-
-                                                    // -----------------------------
-                                                    // Save user to local SQLite
-                                                    // -----------------------------
-
-                                                    val databaseHelper =
-                                                        DatabaseHelper(context)
-
-                                                    databaseHelper.addUser(
-                                                        name = fullName.trim(),
-                                                        email = email.trim()
-                                                    )
-
-
-
-                                                    Toast.makeText(
-                                                        context,
-                                                        "Account created successfully",
-                                                        Toast.LENGTH_SHORT
-                                                    ).show()
-
-                                                    // Go to Login
-                                                    onCreateAccountClick()
-                                                }
-
-                                                .addOnFailureListener {
-
-                                                    // Firebase Authentication succeeded,
-                                                    // but Firestore failed.
-                                                    // We still save the user locally.
-
-                                                    val databaseHelper =
-                                                        DatabaseHelper(context)
-
-                                                    databaseHelper.addUser(
-                                                        name = fullName.trim(),
-                                                        email = email.trim()
-                                                    )
-
-
-
-                                                    Toast.makeText(
-                                                        context,
-                                                        "Account created, but profile save failed",
-                                                        Toast.LENGTH_LONG
-                                                    ).show()
-
-                                                    // Still go to Login
-                                                    onCreateAccountClick()
-                                                }
-                                        }
-
-                                    } else {
-
-                                        Toast.makeText(
-                                            context,
-                                            task.exception?.message
-                                                ?: "Registration failed",
-                                            Toast.LENGTH_LONG
-                                        ).show()
+                            if (submitting) return@Button
+                            submitting = true
+                            scope.launch {
+                                try {
+                                    val auth = FirebaseAuth.getInstance()
+                                    val user = withTimeout(25_000) { auth.createUserWithEmailAndPassword(email.trim(), password).awaitResult().user }
+                                        ?: error("Account creation failed")
+                                    runCatching {
+                                        withTimeout(15_000) { user.updateProfile(com.google.firebase.auth.userProfileChangeRequest { displayName = fullName.trim().take(80) }).awaitResult() }
                                     }
-                                }
+                                    val saved = runCatching {
+                                        withTimeout(20_000) {
+                                            FirebaseFirestore.getInstance().collection("users").document(user.uid)
+                                                .set(mapOf("name" to fullName.trim().take(80), "email" to email.trim())).awaitResult()
+                                        }
+                                    }.isSuccess
+                                    withContext(Dispatchers.IO) {
+                                        runCatching { ChatSphereApp.instance.database.addUser(fullName.trim(), email.trim()) }
+                                    }
+                                    Toast.makeText(context, if (saved) "Account created" else "Account created; profile synchronization is pending. Sign in to retry.", Toast.LENGTH_LONG).show()
+                                    onCreateAccountClick()
+                                } catch (e: Exception) {
+                                    if (e is CancellationException && e !is TimeoutCancellationException) throw e
+                                    Toast.makeText(context, if (e is TimeoutCancellationException) "Registration timed out. It may have succeeded; try signing in." else "Could not register. Check connection and account details.", Toast.LENGTH_LONG).show()
+                                } finally { submitting = false }
+                            }
                         },
 
                         modifier = Modifier

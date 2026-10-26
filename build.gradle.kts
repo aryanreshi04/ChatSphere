@@ -4,3 +4,9 @@
         alias(libs.plugins.kotlin.compose) apply false
         id("com.google.gms.google-services") version "4.5.0" apply false
     }
+
+// Optional local override for OneDrive checkouts whose generated files become cloud placeholders.
+providers.gradleProperty("chatsphereBuildRoot").orNull?.let { outputRoot ->
+    layout.buildDirectory.set(file("$outputRoot/root"))
+    subprojects { layout.buildDirectory.set(file("$outputRoot/$name")) }
+}
