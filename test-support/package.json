@@ -1,0 +1,6 @@
+{
+  "name":"chatsphere-local-rules-tests","private":true,"type":"module",
+  "scripts":{"test":"node --test rules.test.mjs","emulators":"firebase emulators:start --project demo-chatsphere --only auth,firestore --config ../firebase.json"},
+  "devDependencies":{"@firebase/rules-unit-testing":"6.0.0","firebase":"13.1.0","firebase-tools":"15.34.1"},
+  "overrides":{"@grpc/grpc-js":"^1.13.6","@opentelemetry/core":"^2.8.0","gaxios":{"uuid":"^11.1.1"}}
+}

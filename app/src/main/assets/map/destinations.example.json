@@ -1,0 +1,10 @@
+{
+  "note": "Illustrative placeholders only, not a real campus. Replace every coordinate and verify before setting verified=true. Copy destinations into config.json only after verification.",
+  "destinations": [
+    {"name":"Academic building (example)","latitude":0.001,"longitude":0.001,"verified":false},
+    {"name":"Laboratory (example)","latitude":0.002,"longitude":0.001,"verified":false},
+    {"name":"Library (example)","latitude":0.001,"longitude":0.002,"verified":false},
+    {"name":"Administration (example)","latitude":0.002,"longitude":0.002,"verified":false},
+    {"name":"Canteen (example)","latitude":0.003,"longitude":0.002,"verified":false}
+  ]
+}

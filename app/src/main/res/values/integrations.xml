@@ -1,0 +1,6 @@
+<resources>
+    <!-- Public backend URL only. Never put private API keys or Admin credentials in Android resources. -->
+    <string name="assistant_endpoint" translatable="false"></string>
+    <!-- Decimal bytes; match backend MEDIA_MAX_BYTES and bucket limits, at most 50,000,000. -->
+    <integer name="chat_media_max_bytes">50000000</integer>
+</resources>

@@ -1,0 +1,20 @@
+{
+  "name": "chatsphere-local-backend",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env server.mjs",
+    "push": "node --env-file-if-exists=.env push-worker.mjs",
+    "test": "node --test test/*.test.mjs",
+    "test:live:gemini": "node --env-file-if-exists=.env test-live-gemini.mjs",
+    "test:media:emulator": "node --test test/media-firestore.integration.mjs",
+    "test:live:media": "node --env-file-if-exists=.env --test test/live-media.integration.mjs"
+  },
+  "dependencies": {
+    "firebase-admin": "14.5.0"
+  }
+}

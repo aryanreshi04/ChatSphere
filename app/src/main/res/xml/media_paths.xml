@@ -1,0 +1,1 @@
+<paths xmlns:android="http://schemas.android.com/apk/res/android"><files-path name="pending_photos" path="media-outbox/" /><files-path name="cached_photos" path="chat-media-cache/" /></paths>

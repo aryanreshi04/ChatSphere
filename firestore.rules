@@ -1,0 +1,104 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signed() { return request.auth != null; }
+    function own(uid) { return signed() && request.auth.uid == uid; }
+    function member(id) {
+      return signed() && request.auth.uid in get(/databases/$(database)/documents/conversations/$(id)).data.participants;
+    }
+    function memberAfter(id) {
+      return signed() && request.auth.uid in getAfter(/databases/$(database)/documents/conversations/$(id)).data.participants;
+    }
+    function profile(data) {
+      return data.keys().hasOnly(['name','email']) && data.keys().hasAll(['name','email'])
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 80
+        && data.email is string && data.email.size() <= 254 && data.email == request.auth.token.email;
+    }
+    match /users/{uid} {
+      // The existing contact picker is an authenticated directory of names and emails.
+      allow read: if signed();
+      allow create, update: if own(uid) && profile(request.resource.data);
+      allow delete: if false;
+      match /hiddenChats/{conversationId} {
+        allow read, delete: if own(uid);
+        allow create, update: if own(uid) && member(conversationId)
+          && request.resource.data.keys().hasOnly(['hiddenMessageId'])
+          && request.resource.data.hiddenMessageId is string && request.resource.data.hiddenMessageId.size() <= 128;
+      }
+      match /pushTests/{testId} {
+        allow read: if own(uid);
+        // Only the authenticated Admin backend creates expiring self-test records.
+        allow write: if false;
+      }
+      match /devices/{deviceId} {
+        allow read, delete: if own(uid);
+        allow create, update: if own(uid) && deviceId.matches('[a-f0-9]{64}')
+          && request.resource.data.keys().hasOnly(['token','updatedAt'])
+          && request.resource.data.token is string && request.resource.data.token.size() > 20
+          && request.resource.data.token.size() <= 4096 && request.resource.data.updatedAt == request.time;
+      }
+    }
+    match /conversations/{conversationId} {
+      // Reading an absent document returns no data and is needed by the creation transaction.
+      allow get: if signed() && (!exists(/databases/$(database)/documents/conversations/$(conversationId)) || request.auth.uid in resource.data.participants);
+      allow list: if signed() && request.auth.uid in resource.data.participants;
+      allow create: if signed() && request.resource.data.keys().hasOnly(['participants','lastMessage','lastMessageTime','lastMessageId'])
+        && request.resource.data.participants is list && request.resource.data.participants.size() == 2
+        && request.resource.data.participants[0] is string && request.resource.data.participants[1] is string
+        && request.resource.data.participants[0] != request.resource.data.participants[1]
+        && request.auth.uid in request.resource.data.participants
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.participants[0]))
+        && exists(/databases/$(database)/documents/users/$(request.resource.data.participants[1]))
+        && (conversationId == request.resource.data.participants[0] + '_' + request.resource.data.participants[1]
+          || conversationId == request.resource.data.participants[1] + '_' + request.resource.data.participants[0])
+        && request.resource.data.lastMessage == '' && request.resource.data.lastMessageId == ''
+        && request.resource.data.lastMessageTime is int && request.resource.data.lastMessageTime >= 0
+        && request.resource.data.lastMessageTime <= request.time.toMillis() + 300000;
+      allow update: if member(conversationId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['lastMessage','lastMessageTime','lastMessageId'])
+        && request.resource.data.lastMessage is string && request.resource.data.lastMessage.size() <= 4000
+        && request.resource.data.lastMessageTime is int && request.resource.data.lastMessageTime >= resource.data.lastMessageTime
+        && getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)).data.senderId == request.auth.uid
+        && getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)).data.timestamp == request.resource.data.lastMessageTime
+        && request.resource.data.lastMessage ==
+          (getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)).data.get('type','text') == 'image' ? 'Photo' :
+          (getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)).data.get('type','text') == 'location' ? 'Shared location' :
+           getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(request.resource.data.lastMessageId)).data.text));
+      allow delete: if false;
+      // Supabase image/video/audio metadata is written only by the Firebase-authorized trusted backend.
+      // The client-create whitelist below deliberately rejects storageProvider/mediaPath fields.
+      match /messages/{messageId} {
+        allow read: if member(conversationId);
+        allow create: if memberAfter(conversationId)
+          && request.resource.data.keys().hasAll(['senderId','text','timestamp'])
+          && request.resource.data.keys().hasOnly(['senderId','text','timestamp','type','serverTimestamp','latitude','longitude'])
+          && request.resource.data.senderId == request.auth.uid
+          && request.resource.data.timestamp is int && request.resource.data.timestamp > 0
+          && request.resource.data.timestamp <= request.time.toMillis() + 300000
+          && request.resource.data.text is string && request.resource.data.text.size() <= 4000
+          && (!('serverTimestamp' in request.resource.data) || request.resource.data.serverTimestamp == request.time)
+          && ((request.resource.data.get('type','text') == 'text' && request.resource.data.text.size() > 0
+              && !('latitude' in request.resource.data) && !('longitude' in request.resource.data))
+            || (request.resource.data.get('type','text') == 'location'
+              && request.resource.data.latitude is number && request.resource.data.longitude is number
+              && request.resource.data.latitude >= -90 && request.resource.data.latitude <= 90
+              && request.resource.data.longitude >= -180 && request.resource.data.longitude <= 180)
+            || (request.resource.data.get('type','text') == 'image'
+              && getAfter(/databases/$(database)/documents/conversations/$(conversationId)/media/$(messageId)).data.senderId == request.auth.uid));
+        allow update, delete: if false;
+      }
+      match /media/{messageId} {
+        allow read: if member(conversationId);
+        allow create: if memberAfter(conversationId)
+          && request.resource.data.keys().hasOnly(['senderId','mimeType','base64'])
+          && request.resource.data.senderId == request.auth.uid && request.resource.data.mimeType == 'image/jpeg'
+          && request.resource.data.base64 is string && request.resource.data.base64.size() <= 163840
+          && request.resource.data.base64.matches('/9j/.*')
+          && getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(messageId)).data.type == 'image'
+          && getAfter(/databases/$(database)/documents/conversations/$(conversationId)/messages/$(messageId)).data.senderId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}

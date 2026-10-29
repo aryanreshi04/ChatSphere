@@ -1,0 +1,9 @@
+<resources>
+    <string name="video_loading">Loading full video…</string>
+    <string name="video_back">Back to chat</string>
+    <string name="video_retry">Retry playback</string>
+    <string name="video_controls">Tap video for play, pause and seek controls</string>
+    <string name="video_error">This video could not play. Retry, or save the file and use another player.</string>
+    <string name="video_finished">Video finished. Use the player controls to replay.</string>
+    <string name="video_unavailable">Video unavailable. Return to chat and download again.</string>
+</resources>

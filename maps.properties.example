@@ -1,0 +1,3 @@
+# Copy to ignored maps.properties only after configuring a restricted Maps SDK Android key.
+# Do not put Gemini/Supabase/Admin secrets here. This client key is packaged in the APK.
+MAPS_API_KEY=
